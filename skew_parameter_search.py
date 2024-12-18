@@ -85,8 +85,11 @@ class shift_holder(object):
 		self.fitter_name = fitter_name
 		self.kwargs = kwargs
 		self.save_dir = kwargs.get('save_dir',os.getcwd())
+		self.save_file = kwargs.get('save_file','shift_vars_'+self.hdr['filename']+self.hdr['EXTNAME']+self.fitter_name+'.npz')
+		save_path = os.path.join(self.save_dir,self.save_file)
 		self.discretization = kwargs.get('discretization',1000)
 		self.valdict = {}
+		if(kwargs.get('noload') is None and os.path.exists(save_path)): self.load()
 
 	def get(self,shifts):
 		return self.valdict.get(self.make_key(shifts)[0])
@@ -106,7 +109,7 @@ class shift_holder(object):
 			self.valdict[key] = xs, ys, var
 
 	def save(self,filename=None):
-		if(filename is None): filename = 'shift_vars_'+self.hdr['filename']+self.hdr['EXTNAME']+self.fitter_name+'.npz'
+		if(filename is None): filename = self.save_file
 		keys = list(self.valdict.keys())
 		outarray = np.zeros([3,len(keys)])
 		for i in range(0,len(keys)): outarray[:,i] = self.valdict[keys[i]]
@@ -115,7 +118,7 @@ class shift_holder(object):
 		np.savetxt(os.path.join(self.save_dir,filename), outarray.T, header=header, delimiter=',')
 
 	def load(self, filename=None):
-		if(filename is None): filename = 'shift_vars_'+self.hdr['filename']+self.hdr['EXTNAME']+self.fitter_name+'.npz'
+		if(filename is None): filename = self.save_file
 		self.set(np.loadtxt(os.path.join(self.save_dir,filename), delimiter=','))
 
 def search_shifts_mp(spice_dat, spice_hdr, xshifts, yshifts, line_waves, line_names, fitter, **kwargs):
