@@ -1,5 +1,9 @@
-import os, numpy as np; from scipy.optimize import least_squares
+import os, copy, numpy as np; from scipy.optimize import least_squares
 from skew_correction import skew_correct, deskew_linefit_window
+from linefit_leastsquares import lsq_fitter
+from util import get_mask_errs, get_spice_err
+from linefit_storage import linefits
+
 
 def simple_lls(dat, err, funcs_in): # Simple LLS fit of funcs with linear coeffs to data
 	nf = len(funcs_in)
@@ -131,9 +135,8 @@ def search_shifts_mp(spice_dat, spice_hdr, xshifts, yshifts, line_waves, line_na
 		if(shift_vars.get([xs_flat[i],ys_flat[i]]) is None):
 			key, xs, ys = shift_vars.make_key([xs_flat[i],ys_flat[i]])
 			packages.append([spice_dat, spice_hdr, xs, ys, line_waves, line_names, kwargs])
-	if __name__ == '__main__':
-		#for package in packages: shift_vars.set(shift_runner(package))
-		pool = multiprocessing.Pool(9)
-		r = pool.map_async(shift_runner, packages, callback=shift_vars.set)
-		r.wait()
+	#for package in packages: shift_vars.set(shift_runner(package))
+	pool = multiprocessing.Pool(9)
+	r = pool.map_async(shift_runner, packages, callback=shift_vars.set)
+	r.wait()
 	return shift_vars
