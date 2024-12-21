@@ -140,3 +140,22 @@ def search_shifts_mp(spice_dat, spice_hdr, xshifts, yshifts, line_waves, line_na
 	r = pool.map_async(shift_runner, packages, callback=shift_vars.set)
 	r.wait()
 	return shift_vars
+
+from scipy.interpolate import RegularGridInterpolator, LinearNDInterpolator as lndi
+def refine_points(shift_vars, xgrange, ygrange, ngx, ngy, npts_refine, min_input=0.275, min_output=0.1):
+	xa = np.array(list(shift_vars.valdict.values()))[:,0]
+	ya = np.array(list(shift_vars.valdict.values()))[:,1]
+	dat = np.array(list(shift_vars.valdict.values()))[:,2]
+
+	include = (np.abs(xa) > min_input)*(np.abs(ya) > min_input)
+	
+	xya = np.vstack([xa[include],ya[include]]).T
+	xa0,ya0 = np.array(np.meshgrid(np.linspace(xgrange[0], xgrange[1],ngx),np.linspace(ygrange[0],ygrange[1],ngy))).transpose([0,2,1])
+	dat_interp = lndi(xya, dat[include])(xa0,ya0)
+
+	sort_interp = np.argsort(dat_interp.flatten())
+	xsort_interp = xa0.flatten()[sort_interp]
+	ysort_interp = ya0.flatten()[sort_interp]
+	output_include = (np.abs(xsort_interp) > min_output)*(np.abs(ysort_interp) >= min_output)
+
+	return xsort_interp[output_include][0:npts_refine], ysort_interp[output_include][0:npts_refine]
