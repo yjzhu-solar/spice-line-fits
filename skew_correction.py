@@ -68,7 +68,7 @@ def skew_correct(dat, xlshift, ylshift, dx, dy, dl, l0, skew_bin_facs=default_bi
 	return spicedat_skew # Done.
 
 
-def deskew_linefit_window(win_in, xlshift, ylshift, binfacs=default_bin_fac, lcen=None, lambdas=None, dopp_key='centers'):
+def deskew_linefit_window(win_in, xlshift, ylshift, skew_bin_facs=[1,1], lcen=None, lambdas=None, dopp_key='centers'):
 	window = copy.deepcopy(win_in)
 	for linkey in win_in:
 		line = win_in[linkey]
@@ -82,26 +82,26 @@ def deskew_linefit_window(win_in, xlshift, ylshift, binfacs=default_bin_fac, lce
 			dx, dy = hdr['CDELT1'],hdr['CDELT2']
 
 			# Set up the coordinate arrays used by the interpolator:
-			spice_x = dx*np.arange(shape[0]*binfacs[0])/binfacs[0]
-			spice_y = dy*np.arange(shape[1]*binfacs[1])/binfacs[1]
-			[spice_xa0,spice_ya0] = np.indices((binfacs*shape).astype(np.int32))
-			spice_xa0 = dx*spice_xa0/binfacs[0]
-			spice_ya0 = dy*spice_ya0/binfacs[1]
+			spice_x = dx*np.arange(shape[0]*skew_bin_facs[0])/skew_bin_facs[0]
+			spice_y = dy*np.arange(shape[1]*skew_bin_facs[1])/skew_bin_facs[1]
+			[spice_xa0,spice_ya0] = np.indices((skew_bin_facs*shape).astype(np.int32))
+			spice_xa0 = dx*spice_xa0/skew_bin_facs[0]
+			spice_ya0 = dy*spice_ya0/skew_bin_facs[1]
 			
 			# Compute how much each line profile/pixel in the Doppler image was x-y shifted,
 			# with the same the up-sampling as in skew_correct:
-			dlambdas = binup(doppler.data.squeeze()-lcen,binfacs)
+			dlambdas = binup(doppler.data.squeeze()-lcen,skew_bin_facs)
 			xshift = spice_xa0 - xlshift*dlambdas
 			yshift = spice_ya0 - ylshift*dlambdas
 
 			for i in range(0,parm.data.shape[2]):
 				for j in range(0,parm.data.shape[3]):
-					datagood = binup(parm.uncertainty.array[:,:,i,j] > 0,binfacs)
-					dat = binup(parm.data[:,:,i,j],binfacs)[datagood].flatten()
-					err = binup(parm.uncertainty.array[:,:,i,j],binfacs)[datagood].flatten()
+					datagood = binup(parm.uncertainty.array[:,:,i,j] > 0,skew_bin_facs)
+					dat = binup(parm.data[:,:,i,j],skew_bin_facs)[datagood].flatten()
+					err = binup(parm.uncertainty.array[:,:,i,j],skew_bin_facs)[datagood].flatten()
 					spice_xya = np.array([xshift[datagood].flatten(),yshift[datagood].flatten()]).T
-					dat_lndi = bindown2(lndi(spice_xya, dat)(spice_xa0,spice_ya0),binfacs)/np.prod(binfacs)
-					err_lndi = bindown2(lndi(spice_xya, err)(spice_xa0,spice_ya0),binfacs)/np.prod(binfacs)
+					dat_lndi = bindown2(lndi(spice_xya, dat)(spice_xa0,spice_ya0),skew_bin_facs)/np.prod(skew_bin_facs)
+					err_lndi = bindown2(lndi(spice_xya, err)(spice_xa0,spice_ya0),skew_bin_facs)/np.prod(skew_bin_facs)
 					err_lndi[np.isnan(dat_lndi)]=parm.meta['BAD_ERR']; dat_lndi[np.isnan(dat_lndi)]=0
 					window[linkey][parmkey].uncertainty.array[:,:,i,j] = err_lndi
 					window[linkey][parmkey].data[:,:,i,j] = dat_lndi
