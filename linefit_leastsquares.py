@@ -1,8 +1,8 @@
 import numpy as np; from scipy.optimize import least_squares
 
-def fitter(datacube, errorcube, waves, dat_mask, centers_in, sig_guesses, line_names_in,
+def lsq_fitter(datacube, errorcube, waves, dat_mask, centers_in, sig_guesses, line_names_in,
 			n_status=8, ndof_min=2, noisefloor=None, cenbound_fac = 0.05, widbound_fac=0.25,
-			cenbounds=None, verbose=True, xscale_rad=0.1, xscale_wav=0.001, bad_err=-65536,
+			cenbounds=None, verbose=False, xscale_rad=0.1, xscale_wav=0.001, bad_err=-65536,
 			fg_param_types = ['WAVELENGTH','RADIANCE','WAVELENGTH'], bg_param_types=['RADIANCE'],
 			fg_param_units = ['W/m2/sr','nm','nm'], bg_param_units = ['W/m2/sr']):
 
@@ -12,7 +12,7 @@ def fitter(datacube, errorcube, waves, dat_mask, centers_in, sig_guesses, line_n
 			centers.append(centers_in[i]); line_names.append(line_names_in[i])
 
 	if(np.isscalar(sig_guesses)): sig_guesses = sig_guesses+np.zeros(len(centers))
-	print('Fitting ', line_names)
+	if(verbose): print('Fitting ', line_names)
 	
 	nl, nw, dw = len(centers), len(waves), (waves[-1]-waves[0])
 	nx, ny, nf = datacube.shape[0], datacube.shape[1], 3*nl+1
