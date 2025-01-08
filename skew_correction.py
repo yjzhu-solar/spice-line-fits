@@ -68,7 +68,7 @@ def skew_correct(dat, xlshift, ylshift, dx, dy, dl, l0, skew_bin_facs=default_bi
 	return spicedat_skew # Done.
 
 
-def deskew_linefit_window(win_in, xlshift, ylshift, skew_bin_facs=[1,1], lcen=None, lambdas=None, dopp_key='centers'):
+def deskew_linefit_window(win_in, xlshift, ylshift, skew_bin_facs=default_bin_fac, lcen=None, lambdas=None, dopp_key='centers'):
 	window = copy.deepcopy(win_in)
 	for linkey in win_in:
 		line = win_in[linkey]
