@@ -89,7 +89,7 @@ class shift_holder(object):
 		self.fitter_name = fitter_name
 		self.kwargs = kwargs
 		self.save_dir = kwargs.get('save_dir',os.getcwd())
-		self.save_file = kwargs.get('save_file','shift_vars_'+self.hdr['filename']+self.hdr['EXTNAME']+self.fitter_name+'.npz')
+		self.save_file = kwargs.get('save_file','shift_vars_'+self.hdr['filename']+self.hdr['EXTNAME']+self.fitter_name+'.csv')
 		self.save_file = self.save_file.replace('/','_')
 		save_path = os.path.join(self.save_dir,self.save_file)
 		self.discretization = kwargs.get('discretization',1000)
