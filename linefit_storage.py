@@ -1,6 +1,13 @@
+# These are routines for storing the results of spectral line fitting
+# in fits files and read them back into an organized internal Python
+# representation.
+
 import os, copy, numpy as np; from astropy.io import fits; 
 from astropy.nddata import NDData, StdDevUncertainty
 
+# These are the special names that the storage algorithm looks for in fits
+# files in order to turn them from the flat fits structure into
+# the more nested internal representation:
 uncertainty_name_postfix='ERRORS'; uncertainty_dat_type='SPECTRAL_FIT_PARAMETER_ERRORS'
 parameter_name_key='PRM_NAME'; line_name_key='LIN_NAME'; win_name_key='WIN_NAME'
 
@@ -23,7 +30,9 @@ class linefits(iterdict):
 			else: self.update(args[0])
 		if(kwargs.get('filename',0)): 
 			self.load((kwargs.get('filename')))
-			
+
+	# Could probably stand to have a pretty print method here...
+
 	def save(self,filename):
 		write_spice_linefit_file(filename,self)
 		
@@ -76,6 +85,8 @@ def create_linefit_window(data, uncertainties, data_names, data_types, data_unit
 	
 	return iterdict({window_header['EXTNAME']:linefits})
 
+# This turns the window into a 'raw' Python format with the constituent arrays
+# split up. It is the opposite of create_linefit_window.
 def linefit_window_raws(window):
 	
 	data, errs, data_names, data_types, data_units, param_names = [[],[],[],[],[],[]]
@@ -93,6 +104,8 @@ def linefit_window_raws(window):
 	return [np.array(data).transpose([1,2,0]),np.array(errs).transpose([1,2,0]), data_names,
 			data_types, data_units, param_names, output_header]
 
+# Update a fits file with a data array and header. Suprisingly
+# astropy fits doesn't support this very well...
 def update_fits(filename, data, header):
 	# Check to see if the file already exists:
 	if(os.path.exists(filename)):
@@ -106,6 +119,7 @@ def update_fits(filename, data, header):
 	else: # Otherwise, we can just use append:
 		fits.append(filename, data.T, header=header)
 
+# Write spice spectral line fit information to a fits file:
 def write_spice_linefit_file(filename, window_fits):
 	for win in window_fits:
 		for lin in window_fits[win]:
@@ -121,7 +135,8 @@ def write_spice_linefit_file(filename, window_fits):
 				hdr['DAT_TYPE'] = uncertainty_dat_type
 				err = window_fits[win][lin][prm].uncertainty.array
 				update_fits(filename, err, hdr)
-				
+
+# Read spice spectral line fit information from a fits file:
 def read_spice_linefit_file(filename):
 	windows = iterdict()
 	hdul = fits.open(filename)
