@@ -13,6 +13,7 @@ from linefit_leastsquares import lsq_fitter, check_for_waves
 from util import get_mask_errs, get_spice_err, get_spice_data_yrange, make_yrange_check_plot
 from linefit_storage import linefits
 from astropy.io import fits
+from concurrent.futures import ProcessPoolExecutor
 
 def simple_lls(dat, err, funcs_in): # Simple LLS fit of funcs with linear coeffs to data
 	nf = len(funcs_in)
@@ -187,11 +188,15 @@ def search_shifts(spice_dat, spice_hdr, xshifts, yshifts, fitter, **kwargs):
 			key, xs, ys = shift_vars.make_key([xs_flat[i],ys_flat[i]])
 			packages.append([spice_dat, spice_hdr, xs, ys, kwargs])
 	if(kwargs.get('search_multi_thread',False)):
-		pool = multiprocessing.Pool(kwargs.get('search_nthread',8))
-		results = []
-		r = pool.map_async(shift_runner, packages, callback=results.append)
-		r.wait()
-		for result in results: shift_vars.set(result)
+		with ProcessPoolExecutor(max_workers=kwargs.get('search_nthread',8)) as executor:
+			results=executor.map(shift_runner, packages, chunksize=1)
+
+		# pool = multiprocessing.Pool(kwargs.get('search_nthread',8))
+		# results = []
+		# r = pool.map_async(shift_runner, packages, callback=results.append)
+		# r.wait()
+			for result in results:
+				shift_vars.set(result)
 	else:
 		for i in range(0,len(packages)):
 			svar = shift_runner(packages[i]) 

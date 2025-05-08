@@ -1,5 +1,6 @@
 import subprocess, multiprocessing, numpy as np
 from scipy.optimize import least_squares
+from concurrent.futures import ProcessPoolExecutor
 
 # Check to see which lines are present in a window
 def check_for_waves(waves,linelist=None):
@@ -97,56 +98,160 @@ def lsq_fitter(datacube, errorcube, waves, dat_mask, sig_guesses, linelist=None,
 	results = []
 	if(single_thread):
 		for pkg in packages: results.append(lsq_fitter_mp_runner(pkg))
+		for i in range(0,nx):
+			fits[i] = results[0][i][0]
+			fit_errs[i] = results[0][i][1]
 	else:
-		pool = multiprocessing.Pool(nthreads)
-		r = pool.map_async(lsq_fitter_mp_runner, packages, callback=results.append)
-		r.get()
-	for i in range(0,nx):
-		fits[i] = results[0][i][0]
-		fit_errs[i] = results[0][i][1]
+		# pool = multiprocessing.Pool(nthreads)
+		# r = pool.map_async(lsq_fitter_mp_runner, packages, callback=results.append)
+		# r.get()
+		with ProcessPoolExecutor(max_workers=nthreads) as executor:
+			results=executor.map(lsq_fitter_mp_runner, packages, chunksize=100)
+
+			for ii, result in enumerate(results):
+				fits[ii] = result[0]
+				fit_errs[ii] = result[1]
 
 	return fits, fit_errs, data_names, data_types, data_units, param_names
 
-# This runs the fitter for each raster line, using scipy.optimize.least_squares:
 def lsq_fitter_mp_runner(package):
-	i, nl, datacube, errorcube, dat_mask, subwins, waves, noisefloor, lbounds, ubounds, guess, xscales, bad_err, ndof_min, widbound_fac = package
-	nw, dw = len(waves), (waves[-1]-waves[0])
-	nx, ny, nf = datacube.shape[0], datacube.shape[1], 3*nl+1
-	fits, fit_errs = np.zeros([ny,nf+1]), bad_err*np.ones([ny,nf+1])
-	for j in range(0,ny): # Loop each pixel in the raster line
-		dat, err, msk = datacube[i,j,:], errorcube[i,j,:], np.logical_not(dat_mask[i,j,:])
-		# Each subwindow must have at least 3 wavelength points present in order to make a fit:
-		mask_check = np.prod([np.sum(msk[subwin[0]:subwin[1]]) >= 3 for subwin in subwins])
-		ndof = np.sum(msk) - nf
-		if(mask_check and ndof >= ndof_min):
-			# Set up bounds and initial guess:
-			cont = np.min(dat[msk])
-			lbounds[-1]=cont-3*noisefloor; ubounds[-1]=np.max(dat[msk]); guess[-1]=cont
-			for k in range(0,nl):
-				swdat = dat[subwins[k,0]:subwins[k,1]][msk[subwins[k,0]:subwins[k,1]]]
-				swwav = waves[subwins[k,0]:subwins[k,1]][msk[subwins[k,0]:subwins[k,1]]]
-				guess[3*k] = np.max(swdat); guess[3*k+1] = swwav[np.argmax(swdat)]
-				ubounds[3*k] = guess[3*k] + 5*np.max(err[subwins[k,0]:subwins[k,1]][msk[subwins[k,0]:subwins[k,1]]])
-				lbounds[3*k+2], ubounds[3*k+2] = waves[1]-waves[0], widbound_fac*dw # Shouldn't be changing?
-			
-			if(np.prod(ubounds > lbounds) > 0):
-				# Run the fitter:
-				guess_final = np.clip(guess,lbounds+0.001*(ubounds-lbounds),ubounds-0.001*(ubounds-lbounds))
-				dat, err, wvl = dat[msk], err[msk], waves[msk]
-				resid = resid_evaluator(wvl,dat,err,multi_gaussian_profile)
-				try:
-					solution = least_squares(resid.get, guess_final, bounds=(lbounds,ubounds), x_scale=xscales)			
-					jac_inv_var = 2*np.sum(solution['jac']**2,axis=0)*ndof/nf # Error estimate based on Jacobian
-					if(np.prod(jac_inv_var > 0)): # Assign fits, chi squared, and uncertainties to output:
-						fits[j,0:nf] = solution['x']; fits[j,nf] = solution['cost']
-						fit_errs[j,0:nf] = (1/jac_inv_var)**0.5; fit_errs[j,nf] = np.sqrt(2*ndof)/ndof
-				except ValueError:
-					print('ValueError in lsq_fitter_mp_runner at '+str(i)+', '+str(j))
-					print('Lower Bound: ',lbounds)
-					print('Guess: ',guess)
-					print('Upper Bound: ',ubounds)
+    i, nl, datacube, errorcube, dat_mask, subwins, waves, noisefloor, lbounds, ubounds, guess, xscales, bad_err, ndof_min, widbound_fac = package
+    nw, dw = len(waves), (waves[-1]-waves[0])
+    nx, ny, nf = datacube.shape[0], datacube.shape[1], 3*nl+1
+    fits, fit_errs = np.zeros([ny,nf+1]), bad_err*np.ones([ny,nf+1])
+    
+    for j in range(0,ny): # Loop each pixel in the raster line
+        dat, err, msk = datacube[i,j,:], errorcube[i,j,:], np.logical_not(dat_mask[i,j,:])
+        # Each subwindow must have at least 3 wavelength points present in order to make a fit:
+        mask_check = np.prod([np.sum(msk[subwin[0]:subwin[1]]) >= 3 for subwin in subwins])
+        ndof = np.sum(msk) - nf
+        
+        if(mask_check and ndof >= ndof_min):
+            # Set up bounds and initial guess with more relaxed constraints:
+            dat_min = np.min(dat[msk])
+            dat_max = np.max(dat[msk])
+            dat_range = dat_max - dat_min
+            
+            # More flexible continuum bounds
+            cont = dat_min
+            lbounds[-1] = max(cont - 5*noisefloor, 0)  # Ensure non-negative if appropriate
+            ubounds[-1] = dat_max + 2*noisefloor      # Allow slightly higher than max
+            guess[-1] = cont
+            
+            for k in range(0,nl):
+                # Get data for this subwindow
+                sw_slice = slice(subwins[k,0], subwins[k,1])
+                swdat = dat[sw_slice][msk[sw_slice]]
+                swwav = waves[sw_slice][msk[sw_slice]]
+                
+                if len(swdat) > 0:
+                    # Amplitude
+                    amp_max = np.max(swdat)
+                    guess[3*k] = amp_max
+                    # More flexible amplitude bounds
+                    ubounds[3*k] = amp_max + 10*np.max(err[sw_slice][msk[sw_slice]])
+                    lbounds[3*k] = max(0.1*amp_max, noisefloor)  # Allow for weak lines
+                    
+                    # Central wavelength
+                    if len(swdat) > 0 and len(swwav) > 0:
+                        peak_wav = swwav[np.argmax(swdat)]
+                        guess[3*k+1] = peak_wav
+                        # More flexible wavelength bounds
+                        window_width = waves[subwins[k,1]-1] - waves[subwins[k,0]]
+                        lbounds[3*k+1] = max(waves[subwins[k,0]], peak_wav - 0.3*window_width)
+                        ubounds[3*k+1] = min(waves[subwins[k,1]-1], peak_wav + 0.3*window_width)
+                    
+                    # Width
+                    # More flexible width bounds
+                    min_width = max(waves[1]-waves[0], 0.5*(waves[1]-waves[0]))  # Minimum reasonable width
+                    max_width = min(widbound_fac*dw, 0.5*window_width)  # Cap at half the window width
+                    lbounds[3*k+2] = min_width
+                    ubounds[3*k+2] = max_width
+                    
+                    # Default width guess - using a more moderate value
+                    if guess[3*k+2] <= lbounds[3*k+2] or guess[3*k+2] >= ubounds[3*k+2]:
+                        guess[3*k+2] = 0.1 * (ubounds[3*k+2] - lbounds[3*k+2]) + lbounds[3*k+2]
+            
+            # Ensure all bounds are properly ordered with some margin
+            for param_idx in range(len(lbounds)):
+                if lbounds[param_idx] >= ubounds[param_idx]:
+                    margin = max(0.2 * abs(guess[param_idx]), noisefloor)
+                    middle = guess[param_idx]
+                    if not (lbounds[param_idx] < middle < ubounds[param_idx]):
+                        middle = (lbounds[param_idx] + ubounds[param_idx]) / 2
+                    lbounds[param_idx] = middle - margin
+                    ubounds[param_idx] = middle + margin
+            
+            # Ensure guess is within bounds with reasonable margins
+            guess_final = np.clip(guess, 
+                                 lbounds + 0.05*(ubounds-lbounds),  # Increased margin from bounds
+                                 ubounds - 0.05*(ubounds-lbounds))
+            
+            # Run the fitter:
+            dat, err, wvl = dat[msk], err[msk], waves[msk]
+            resid = resid_evaluator(wvl, dat, err, multi_gaussian_profile)
 
-	return fits, fit_errs
+            try:
+                # Add max_nfev parameter to allow more iterations
+                solution = least_squares(resid.get, guess_final, bounds=(lbounds, ubounds), 
+                                        x_scale=xscales, max_nfev=100)            
+                jac_inv_var = 2*np.sum(solution['jac']**2, axis=0)*ndof/nf  # Error estimate based on Jacobian
+                
+                if(np.prod(jac_inv_var > 0)):  # Assign fits, chi squared, and uncertainties to output:
+                    fits[j,0:nf] = solution['x']
+                    fits[j,nf] = solution['cost']
+                    fit_errs[j,0:nf] = (1/jac_inv_var)**0.5
+                    fit_errs[j,nf] = np.sqrt(2*ndof)/ndof
+                    
+            except ValueError as e:
+                print(f'ValueError in lsq_fitter_mp_runner at {i}, {j}: {str(e)}')
+                print('Lower Bound: ', lbounds)
+                print('Guess: ', guess_final)  # Show the clipped guess
+                print('Upper Bound: ', ubounds)
+
+    return fits, fit_errs
+
+# This runs the fitter for each raster line, using scipy.optimize.least_squares:
+# def lsq_fitter_mp_runner(package):
+# 	i, nl, datacube, errorcube, dat_mask, subwins, waves, noisefloor, lbounds, ubounds, guess, xscales, bad_err, ndof_min, widbound_fac = package
+# 	nw, dw = len(waves), (waves[-1]-waves[0])
+# 	nx, ny, nf = datacube.shape[0], datacube.shape[1], 3*nl+1
+# 	fits, fit_errs = np.zeros([ny,nf+1]), bad_err*np.ones([ny,nf+1])
+# 	for j in range(0,ny): # Loop each pixel in the raster line
+# 		dat, err, msk = datacube[i,j,:], errorcube[i,j,:], np.logical_not(dat_mask[i,j,:])
+# 		# Each subwindow must have at least 3 wavelength points present in order to make a fit:
+# 		mask_check = np.prod([np.sum(msk[subwin[0]:subwin[1]]) >= 3 for subwin in subwins])
+# 		ndof = np.sum(msk) - nf
+# 		if(mask_check and ndof >= ndof_min):
+# 			# Set up bounds and initial guess:
+# 			cont = np.min(dat[msk])
+# 			lbounds[-1]=cont-3*noisefloor; ubounds[-1]=np.max(dat[msk]); guess[-1]=cont
+# 			for k in range(0,nl):
+# 				swdat = dat[subwins[k,0]:subwins[k,1]][msk[subwins[k,0]:subwins[k,1]]]
+# 				swwav = waves[subwins[k,0]:subwins[k,1]][msk[subwins[k,0]:subwins[k,1]]]
+# 				guess[3*k] = np.max(swdat); guess[3*k+1] = swwav[np.argmax(swdat)]
+# 				ubounds[3*k] = guess[3*k] + 5*np.max(err[subwins[k,0]:subwins[k,1]][msk[subwins[k,0]:subwins[k,1]]])
+# 				lbounds[3*k+2], ubounds[3*k+2] = waves[1]-waves[0], widbound_fac*dw # Shouldn't be changing?
+			
+# 			if(np.prod(ubounds > lbounds) > 0):
+# 				# Run the fitter:
+# 				guess_final = np.clip(guess,lbounds+0.001*(ubounds-lbounds),ubounds-0.001*(ubounds-lbounds))
+# 				dat, err, wvl = dat[msk], err[msk], waves[msk]
+# 				resid = resid_evaluator(wvl,dat,err,multi_gaussian_profile)
+
+# 				try:
+# 					solution = least_squares(resid.get, guess_final, bounds=(lbounds,ubounds), x_scale=xscales)			
+# 					jac_inv_var = 2*np.sum(solution['jac']**2,axis=0)*ndof/nf # Error estimate based on Jacobian
+# 					if(np.prod(jac_inv_var > 0)): # Assign fits, chi squared, and uncertainties to output:
+# 						fits[j,0:nf] = solution['x']; fits[j,nf] = solution['cost']
+# 						fit_errs[j,0:nf] = (1/jac_inv_var)**0.5; fit_errs[j,nf] = np.sqrt(2*ndof)/ndof
+# 				except ValueError:
+# 					print('ValueError in lsq_fitter_mp_runner at '+str(i)+', '+str(j))
+# 					print('Lower Bound: ',lbounds)
+# 					print('Guess: ',guess)
+# 					print('Upper Bound: ',ubounds)
+
+# 	return fits, fit_errs
 
 # Multiple Gaussian profile with a constant background:
 def multi_gaussian_profile(waves,parms):
