@@ -159,12 +159,16 @@ def full_correction(spice_dat, spice_hdr, xlshift, ylshift, **kwargs):
 															impulse_filter=kwargs.get('impulse_filter',False),
 															filter_footprint=kwargs.get('filter_footprint',[1,2,1]))
 
-
 	# Find the main range of the the spice data in y and mask out any missing data:
 	ymin, ymax, band1_ymin, band1_ymax, band2_ymin, band2_ymax, signal_windowed, signal_cube = get_spice_data_yrange(spicedat_skew)
 	spice_skew_fit_mask[:,0:ymin,:] = 1; spice_skew_fit_mask[:,ymax:,:] = 1
 	centers, lines = check_for_waves(spice_la, kwargs.get('linelist',None))
 	nlines = len(centers)
+
+	spice_additional_mask = kwargs.get('spice_additional_mask',None)
+	if(spice_additional_mask is not None):
+		spice_skew_fit_mask = np.logical_or(spice_skew_fit_mask, spice_additional_mask)
+		# spice_skew_fit_err[spice_additional_mask] *= 1e10
 	ndof = np.sum(np.logical_not(spice_skew_fit_mask),axis=2) - (3*nlines+1)
 
 	# Make a plot of the good range of the data:
@@ -173,8 +177,8 @@ def full_correction(spice_dat, spice_hdr, xlshift, ylshift, **kwargs):
 							band2_ymax, signal_windowed, signal_cube, plot_dir=kwargs.get('yrange_plot_dir'))
 
 	# Fit the spectral lines in the data:
-	fit_results = list(fitter(spicedat_skew, spiceerr_skew, spice_la, spice_skew_fit_mask, 
-						 spice_sdev_guess, linelist=kwargs.get('linelist',None), cenbound_fac=0.05, nthreads=kwargs.get('nthreads'), verbose=False))
+	fit_results = list(fitter(spicedat_skew, spice_skew_fit_err, spice_la, spice_skew_fit_mask, 
+						 spice_sdev_guess, linelist=kwargs.get('linelist',None), cenbound_fac=0.0, nthreads=kwargs.get('nthreads'), verbose=False))
 	fit_results.append(spice_hdr)
 	window_skewed = linefits([fit_results])
 
